@@ -7,24 +7,31 @@ const mongoose = require("mongoose");
 const app = express();
 const cors = require('cors')
 const serverless = require('serverless-http')
+const fallbackPlanets = require('./planets-data');
 
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, '/')));
 app.use(cors())
 
-mongoose.connect(process.env.MONGO_URI, {
-    user: process.env.MONGO_USERNAME,
-    pass: process.env.MONGO_PASSWORD,
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}, function(err) {
-    if (err) {
-        console.log("error!! " + err)
-    } else {
-      //  console.log("MongoDB Connection Successful")
-    }
-})
+const hasMongoConfig = Boolean(process.env.MONGO_URI);
+
+if (hasMongoConfig) {
+    mongoose.connect(process.env.MONGO_URI, {
+        user: process.env.MONGO_USERNAME,
+        pass: process.env.MONGO_PASSWORD,
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    }, function(err) {
+        if (err) {
+            console.log("error!! " + err)
+        } else {
+          //  console.log("MongoDB Connection Successful")
+        }
+    })
+} else {
+    console.log("MONGO_URI is not set. Using local in-memory planet data.");
+}
 
 var Schema = mongoose.Schema;
 
@@ -36,22 +43,32 @@ var dataSchema = new Schema({
     velocity: String,
     distance: String
 });
-var planetModel = mongoose.model('planets', dataSchema);
+var planetModel = hasMongoConfig ? mongoose.model('planets', dataSchema) : null;
+
+async function getPlanetById(planetId) {
+    if (planetModel) {
+        return planetModel.findOne({
+            id: planetId
+        }).lean().exec();
+    }
+
+    return fallbackPlanets.find((planet) => planet.id === Number(planetId)) || null;
+}
 
 
+app.post('/planet',   async function(req, res) {
+    try {
+        const planetData = await getPlanetById(req.body.id);
 
-app.post('/planet',   function(req, res) {
-   // console.log("Received Planet ID " + req.body.id)
-    planetModel.findOne({
-        id: req.body.id
-    }, function(err, planetData) {
-        if (err) {
-            alert("Ooops, We only have 9 planets and a sun. Select a number from 0 - 9")
-            res.send("Error in Planet Data")
-        } else {
-            res.send(planetData);
+        if (!planetData) {
+            return res.status(404).send("Planet not found. Select a number from 0 - 8");
         }
-    })
+
+        res.send(planetData);
+    } catch (err) {
+        console.log("error!! " + err)
+        res.status(500).send("Error in Planet Data")
+    }
 })
 
 app.get('/',   async (req, res) => {
